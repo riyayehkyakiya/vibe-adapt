@@ -72,8 +72,6 @@ export function HomeScreen({ go }: { go: Nav }) {
         <div className="px-4 pt-4 flex items-center justify-between">
           <h1 className="text-[22px] font-extrabold tracking-tight">Good evening</h1>
           <div className="flex items-center gap-4 text-muted-foreground">
-            <BellIcon width={22} height={22} />
-            <ClockIcon width={22} height={22} />
             <div className="w-7 h-7 rounded-full bg-gradient-to-br from-primary to-aura-2 grid place-items-center text-[11px] font-bold text-primary-foreground">A</div>
           </div>
         </div>
