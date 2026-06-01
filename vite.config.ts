@@ -12,9 +12,17 @@ export default defineConfig({
     // nitro/vite builds from this
     server: { entry: "server" },
   },
-  // Force-enable Nitro's deploy plugin with the Vercel preset so `bun run build`
-  // emits a .vercel/output/ directory (Vercel Build Output API v3) for deployment.
+  // Force-enable Nitro's deploy plugin with the Vercel preset. The wrapper otherwise
+  // forces Nitro's output into dist/{,server,client}, which clobbers the layout Vercel's
+  // Build Output API requires and causes a NOT_FOUND on deploy. Override the output paths
+  // so the vercel preset writes the canonical .vercel/output/ structure (config.json +
+  // functions/__server.func/ + static/) that Git deploys and `vercel deploy --prebuilt` read.
   nitro: {
     preset: "vercel",
+    output: {
+      dir: ".vercel/output",
+      serverDir: ".vercel/output/functions/__server.func",
+      publicDir: ".vercel/output/static",
+    },
   },
 });
