@@ -1,14 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PhoneFrame } from "@/components/aura/PhoneFrame";
 import {
   HomeScreen, InputScreen, GeneratingScreen, PlayerScreen, AdaptScreen, SummaryScreen,
 } from "@/components/aura/screens";
 import {
-  buildMiniPlayerPlayback,
   DEFAULT_SESSION,
   getSessionFromInput,
-  PHASE_KEYS,
   type MiniPlayerPlayback,
 } from "@/components/aura/session";
 
@@ -30,12 +28,22 @@ function Index() {
   const [inputText, setInputText] = useState("");
   const [playerPhaseIndex, setPlayerPhaseIndex] = useState(0);
   const [miniPlayer, setMiniPlayer] = useState<MiniPlayerPlayback | null>(null);
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(true);
+
+  useEffect(() => {
+    if (!isPlaying) return;
+    if (s !== 4 && !miniPlayer) return;
+    const id = window.setInterval(() => {
+      setElapsedTime(v => Math.min(48000, v + 100));
+      setMiniPlayer(prev => (prev ? { ...prev, elapsedTime: Math.min(48000, prev.elapsedTime + 100), isPlaying } : prev));
+    }, 100);
+    return () => window.clearInterval(id);
+  }, [isPlaying, miniPlayer, s]);
 
   const go = (n: number) => {
     const next = Math.min(6, Math.max(1, n));
-    if (next === 6) {
-      setMiniPlayer(buildMiniPlayerPlayback(session, "release"));
-    }
+    if (next === 6) setMiniPlayer(null);
     setS(next);
   };
 
@@ -43,6 +51,10 @@ function Index() {
     const next = text ?? inputText;
     setInputText(next);
     setSession(getSessionFromInput(next));
+    setMiniPlayer(null);
+    setElapsedTime(0);
+    setPlayerPhaseIndex(0);
+    setIsPlaying(true);
     go(2);
   };
 
@@ -50,13 +62,17 @@ function Index() {
     const text = inputText.trim() || "focus";
     setSession(getSessionFromInput(text));
     setPlayerPhaseIndex(0);
+    setElapsedTime(0);
+    setIsPlaying(true);
     go(3);
   };
 
   const resumePlayback = () => {
     if (!miniPlayer) return;
     setSession(miniPlayer.session);
-    setPlayerPhaseIndex(PHASE_KEYS.indexOf(miniPlayer.phaseKey));
+    setPlayerPhaseIndex(miniPlayer.phaseIndex);
+    setElapsedTime(miniPlayer.elapsedTime);
+    setIsPlaying(miniPlayer.isPlaying);
     go(4);
   };
 
@@ -71,6 +87,12 @@ function Index() {
     setPlayerPhaseIndex,
     miniPlayer,
     resumePlayback,
+    elapsedTime,
+    setElapsedTime,
+    isPlaying,
+    setIsPlaying,
+    setMiniPlayer,
+    setSession,
   };
 
   return (

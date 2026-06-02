@@ -1,29 +1,28 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Waveform } from "./AuraOrb";
 import {
   HomeIcon, SearchIcon, LibraryIcon, SparkIcon, PlayIcon, PauseIcon,
-  PrevIcon, NextIcon, HeartIcon, CloseIcon, ChevronDown, BackIcon, Dots,
+  PrevIcon, NextIcon, HeartIcon, CloseIcon, ChevronDown, Dots,
   PlusIcon, ChevronRight,
 } from "./icons";
 import {
   ADAPT_ORB_COLORS,
-  ARC_DOT_ANIMATION_MS,
-  ARC_PATH,
   ARC_VIEWBOX,
   composingOrbColors,
   getAdaptCopy,
-  getArcDotPosition,
+  getBezierPoint,
+  getPhase,
+  getPhaseLabels,
   getSessionFromInput,
   HOME_MOOD_PRESETS,
-  PHASE_KEYS,
   SUMMARY_METRICS,
   type MiniPlayerPlayback,
-  type PhaseKey,
   type PhaseOrbColors,
   type SessionConfig,
 } from "./session";
 
-const PHASES: PhaseKey[] = ["settle", "activate", "flow", "release"];
+const PHASE_COUNT = 4;
+const SESSION_TOTAL_MS = 48000;
 
 function InputWaveform({ bars = 36, className = "" }: { bars?: number; className?: string }) {
   return (
@@ -66,87 +65,27 @@ type FlowProps = {
   setPlayerPhaseIndex: (index: number) => void;
   miniPlayer: MiniPlayerPlayback | null;
   resumePlayback: () => void;
+  elapsedTime: number;
+  setElapsedTime: (ms: number | ((ms: number) => number)) => void;
+  isPlaying: boolean;
+  setIsPlaying: (value: boolean | ((value: boolean) => boolean)) => void;
+  setMiniPlayer: (value: MiniPlayerPlayback | null) => void;
+  setSession: (session: SessionConfig) => void;
 };
 
-function easeInOutCubic(t: number) {
-  return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
-}
-
-function measurePhasePathLengths(path: SVGPathElement): Record<PhaseKey, number> {
-  const total = path.getTotalLength();
-  const lengths = {} as Record<PhaseKey, number>;
-  for (const pk of PHASES) {
-    const target = getArcDotPosition(pk);
-    let bestL = 0;
-    let bestD = Infinity;
-    const steps = 280;
-    for (let i = 0; i <= steps; i++) {
-      const l = (i / steps) * total;
-      const pt = path.getPointAtLength(l);
-      const d = (pt.x - target.x) ** 2 + (pt.y - target.y) ** 2;
-      if (d < bestD) {
-        bestD = d;
-        bestL = l;
-      }
-    }
-    lengths[pk] = bestL;
-  }
-  return lengths;
-}
-
 function ArcCurve({
-  phase,
+  t,
+  arcPath,
   className = "",
 }: {
-  phase: PhaseKey;
+  t: number;
+  arcPath: string;
   className?: string;
 }) {
   const id = useId().replace(/:/g, "");
-  const pathRef = useRef<SVGPathElement>(null);
-  const phaseLengthsRef = useRef<Record<PhaseKey, number> | null>(null);
-  const currentLengthRef = useRef(0);
-  const rafRef = useRef(0);
-  const readyRef = useRef(false);
-  const [dot, setDot] = useState(() => getArcDotPosition(phase));
-  const fill = `${ARC_PATH} L 390,80 L 10,80 Z`;
-
-  useLayoutEffect(() => {
-    const path = pathRef.current;
-    if (!path) return;
-    const lengths = measurePhasePathLengths(path);
-    phaseLengthsRef.current = lengths;
-    const initial = lengths[phase];
-    currentLengthRef.current = initial;
-    const p = path.getPointAtLength(initial);
-    setDot({ x: p.x, y: p.y });
-    readyRef.current = true;
-  }, []);
-
-  useEffect(() => {
-    if (!readyRef.current) return;
-    const path = pathRef.current;
-    const lengths = phaseLengthsRef.current;
-    if (!path || !lengths) return;
-
-    const from = currentLengthRef.current;
-    const to = lengths[phase];
-    const start = performance.now();
-
-    cancelAnimationFrame(rafRef.current);
-    const tick = (now: number) => {
-      const t = Math.min(1, (now - start) / ARC_DOT_ANIMATION_MS);
-      const len = from + (to - from) * easeInOutCubic(t);
-      const pt = path.getPointAtLength(len);
-      setDot({ x: pt.x, y: pt.y });
-      if (t < 1) {
-        rafRef.current = requestAnimationFrame(tick);
-      } else {
-        currentLengthRef.current = to;
-      }
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [phase]);
+  const clampedT = Math.max(0, Math.min(1, t));
+  const dot = getBezierPoint(arcPath, clampedT);
+  const fill = `${arcPath} L 390,80 L 10,80 Z`;
 
   return (
     <svg viewBox={ARC_VIEWBOX} className={`w-full h-20 ${className}`}>
@@ -167,14 +106,22 @@ function ArcCurve({
       ))}
       <path d={fill} fill={`url(#${id}-fill)`} />
       <path
-        ref={pathRef}
-        d={ARC_PATH}
+        d={arcPath}
         stroke={`url(#${id}-stroke)`}
         strokeWidth="1.75"
         fill="none"
         strokeLinecap="round"
       />
-      <circle cx={dot.x} cy={dot.y} r="3" fill="oklch(0.95 0 0 / 0.9)" />
+      <circle
+        cx={dot.x}
+        cy={dot.y}
+        r={4}
+        fill="white"
+        style={{
+          filter: "drop-shadow(0 0 4px rgba(255,255,255,0.8))",
+          transition: "cx 80ms linear, cy 80ms linear",
+        }}
+      />
     </svg>
   );
 }
@@ -323,26 +270,24 @@ function PhaseOrb({
 
 function MiniPlayer({
   playback,
-  progress = 0.88,
   onTap,
-}: { playback: MiniPlayerPlayback; progress?: number; onTap?: () => void }) {
-  const [playing, setPlaying] = useState(true);
-  const { session, phaseKey } = playback;
-  const track = session.phases[phaseKey];
-  const phaseIdx = PHASE_KEYS.indexOf(phaseKey);
-  const phaseLabel = session.phaseLabels[phaseIdx] ?? session.phaseLabels[3];
+  onTogglePlay,
+}: { playback: MiniPlayerPlayback; onTap?: () => void; onTogglePlay?: () => void }) {
+  const track = getPhase(playback.session, playback.phaseIndex);
+  const phaseLabel = getPhaseLabels(playback.session)[playback.phaseIndex] ?? getPhaseLabels(playback.session)[3];
+  const progress = Math.max(0, Math.min(1, playback.elapsedTime / SESSION_TOTAL_MS));
 
   return (
     <div className="absolute bottom-[68px] inset-x-2.5 rounded-[5px] overflow-hidden bg-[oklch(0.155_0_0)]">
       <div className="w-full flex items-center gap-2.5 px-2 py-1.5 pr-2">
         <button type="button" onClick={onTap} className="flex flex-1 items-center gap-2.5 min-w-0 text-left active:opacity-90 transition-opacity">
           <div className="relative shrink-0">
-            <AlbumArt seed={session.title} size={36} rounded="rounded-[3px]" variant="single" />
+            <AlbumArt seed={playback.session.sessionName} size={36} rounded="rounded-[3px]" variant="single" />
             <div
               className="absolute -inset-0.5 rounded-[4px] pointer-events-none opacity-70"
               style={{
-                boxShadow: `0 0 12px ${track.orbColor.glow}`,
-                border: `1px solid ${track.orbColor.glow}33`,
+                boxShadow: `0 0 12px ${playback.session.orbGlow}`,
+                border: `1px solid ${playback.session.orbGlow}33`,
               }}
             />
           </div>
@@ -354,19 +299,14 @@ function MiniPlayer({
             <div className="text-[10px] text-muted-foreground/90 truncate flex items-center gap-1 mt-0.5">
               <SparkIcon width={9} height={9} className="text-primary shrink-0" />
               <span>
-                {session.title} · {phaseLabel}
+                {playback.session.sessionName} · {phaseLabel}
               </span>
             </div>
           </div>
         </button>
         <HeartIcon width={18} height={18} className="text-primary shrink-0" />
-        <button
-          type="button"
-          onClick={() => setPlaying(p => !p)}
-          className="shrink-0 p-0.5 active:opacity-80"
-          aria-label={playing ? "Pause" : "Play"}
-        >
-          {playing ? <PauseIcon width={20} height={20} /> : <PlayIcon width={20} height={20} />}
+        <button type="button" onClick={onTogglePlay} className="shrink-0 p-0.5 active:opacity-80" aria-label={playback.isPlaying ? "Pause" : "Play"}>
+          {playback.isPlaying ? <PauseIcon width={20} height={20} /> : <PlayIcon width={20} height={20} />}
         </button>
       </div>
       <div className="h-[2px] bg-white/[0.08]">
@@ -377,7 +317,7 @@ function MiniPlayer({
 }
 
 /* ---------- SCREEN 1 — HOME ---------- */
-export function HomeScreen({ beginInput, miniPlayer, resumePlayback }: FlowProps) {
+export function HomeScreen({ beginInput, miniPlayer, resumePlayback, setMiniPlayer }: FlowProps) {
   const chips = ["All", "Music", "Podcasts", "Aura"];
   const [activeChip, setActiveChip] = useState("All");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -559,14 +499,20 @@ export function HomeScreen({ beginInput, miniPlayer, resumePlayback }: FlowProps
         </section>
       </div>
 
-      {miniPlayer && <MiniPlayer playback={miniPlayer} onTap={resumePlayback} />}
+      {miniPlayer && (
+        <MiniPlayer
+          playback={miniPlayer}
+          onTap={resumePlayback}
+          onTogglePlay={() => setMiniPlayer({ ...miniPlayer, isPlaying: !miniPlayer.isPlaying })}
+        />
+      )}
       <TabBar active="home" />
     </div>
   );
 }
 
 /* ---------- SCREEN 2 — INPUT ---------- */
-export function InputScreen({ go, inputText, setInputText, beginComposing }: FlowProps) {
+export function InputScreen({ go, inputText, setInputText, beginComposing, setMiniPlayer, setElapsedTime, setPlayerPhaseIndex, setIsPlaying }: FlowProps) {
   const [interpreting, setInterpreting] = useState(false);
   const preview = useMemo(() => getSessionFromInput(inputText), [inputText]);
   const hasInput = inputText.trim().length >= 3;
@@ -580,7 +526,19 @@ export function InputScreen({ go, inputText, setInputText, beginComposing }: Flo
   return (
     <div className="h-full relative flex flex-col transition-[background] duration-700 ease-out" style={{ background: preview.atmosphere.input }}>
       <div className="flex items-center justify-between px-4 py-3 shrink-0">
-        <button type="button" onClick={() => go(1)} className="p-1 -ml-1"><ChevronDown width={26} height={26} /></button>
+        <button
+          type="button"
+          onClick={() => {
+            setMiniPlayer(null);
+            setElapsedTime(0);
+            setPlayerPhaseIndex(0);
+            setIsPlaying(true);
+            go(1);
+          }}
+          className="p-1 -ml-1"
+        >
+          <ChevronDown width={26} height={26} />
+        </button>
         <div className="flex items-center gap-1.5 text-[10.5px] font-bold tracking-[0.18em] uppercase text-primary/90">
           <SparkIcon width={12} height={12} /> Aura
         </div>
@@ -715,9 +673,10 @@ export function InputScreen({ go, inputText, setInputText, beginComposing }: Flo
 }
 
 /* ---------- SCREEN 3 — GENERATION ---------- */
-export function GeneratingScreen({ go, session }: FlowProps) {
+export function GeneratingScreen({ go, session, setMiniPlayer, setElapsedTime, setPlayerPhaseIndex, setIsPlaying }: FlowProps) {
   const statements = session.composingStatements;
   const [stmtIdx, setStmtIdx] = useState(0);
+  const [previewT, setPreviewT] = useState(0);
 
   useEffect(() => {
     const stmtTimer = setInterval(() => {
@@ -731,12 +690,33 @@ export function GeneratingScreen({ go, session }: FlowProps) {
     return () => clearTimeout(t);
   }, [go]);
 
+  useEffect(() => {
+    const start = performance.now();
+    const id = window.setInterval(() => {
+      const elapsed = performance.now() - start;
+      setPreviewT(Math.min(0.08, (elapsed / 2000) * 0.08));
+    }, 100);
+    return () => window.clearInterval(id);
+  }, []);
+
   const orbColors = composingOrbColors(session);
 
   return (
     <div className="h-full relative overflow-hidden transition-[background] duration-700" style={{ background: session.atmosphere.composing }}>
       <div className="flex items-center justify-between px-4 py-3">
-        <button type="button" onClick={() => go(1)} className="p-1 text-muted-foreground"><CloseIcon width={22} height={22} /></button>
+        <button
+          type="button"
+          onClick={() => {
+            setMiniPlayer(null);
+            setElapsedTime(0);
+            setPlayerPhaseIndex(0);
+            setIsPlaying(true);
+            go(1);
+          }}
+          className="p-1 text-muted-foreground"
+        >
+          <CloseIcon width={22} height={22} />
+        </button>
         <div className="flex items-center gap-1.5 text-[10.5px] font-bold tracking-[0.18em] uppercase text-primary/90">
           <SparkIcon width={12} height={12} /> Aura
         </div>
@@ -753,14 +733,14 @@ export function GeneratingScreen({ go, session }: FlowProps) {
 
       <div className="px-6 mt-3 text-center">
         <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Composing</div>
-        <h2 className="text-[22px] font-extrabold tracking-[-0.025em] mt-2">{session.title}</h2>
+        <h2 className="text-[22px] font-extrabold tracking-[-0.025em] mt-2">{session.sessionName}</h2>
         <p className="text-[12.5px] text-muted-foreground mt-1">{session.subtitle}</p>
       </div>
 
       <div className="px-6 mt-5">
-        <ArcCurve phase="settle" />
+        <ArcCurve t={previewT} arcPath={session.arcPath} />
         <div className="flex justify-between text-[10px] text-muted-foreground mt-1 px-1 tracking-wide">
-          {session.phaseLabels.map(p => <span key={p}>{p}</span>)}
+          {getPhaseLabels(session).map(p => <span key={p}>{p}</span>)}
         </div>
 
         <div className="flex justify-center gap-6 mt-4 mb-2">
@@ -794,115 +774,78 @@ export function GeneratingScreen({ go, session }: FlowProps) {
 }
 
 /* ---------- SCREEN 4 — PLAYER ---------- */
-const PHASE_TICK_MS = 100;
-const PHASE_DURATION_MS = 12000;
-const PROGRESS_PER_TICK = 100 / (PHASE_DURATION_MS / PHASE_TICK_MS);
 
 export function PlayerScreen({
   go,
   session,
   playerPhaseIndex: phaseIndex,
   setPlayerPhaseIndex: setPhaseIndex,
+  elapsedTime,
+  setElapsedTime,
+  isPlaying: playing,
+  setIsPlaying: setPlaying,
+  setMiniPlayer,
 }: FlowProps) {
-  const [playing, setPlaying] = useState(true);
   const [liked, setLiked] = useState(true);
-  const [progress, setProgress] = useState(0);
   const [messageOpacity, setMessageOpacity] = useState(1);
   const [menuOpen, setMenuOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const phaseIndexRef = useRef(phaseIndex);
-  const phaseIntervalRef = useRef<number | null>(null);
-  const playingRef = useRef(true);
-
-  const activePhase = PHASES[phaseIndex];
+  const elapsedRef = useRef(elapsedTime);
   const activePhaseIdx = phaseIndex;
-  const phaseTrack = session.phases[activePhase];
-  const liveOrchestration = session.orchestration[activePhase];
-
-  const elapsedSec = (progress / 100) * 12;
+  const phaseTrack = getPhase(session, activePhaseIdx);
+  const liveOrchestration = phaseTrack.orchestrationCopy;
+  const phaseLabels = getPhaseLabels(session);
+  const phaseElapsed = elapsedTime % 12000;
+  const phaseProgress = Math.max(0, Math.min(100, (phaseElapsed / 12000) * 100));
+  const elapsedSec = phaseElapsed / 1000;
   const remainingSec = Math.max(0, 12 - elapsedSec);
-
-  const clearPhaseInterval = useCallback(() => {
-    if (phaseIntervalRef.current !== null) {
-      window.clearInterval(phaseIntervalRef.current);
-      phaseIntervalRef.current = null;
-    }
-  }, []);
+  const t = Math.max(0, Math.min(1, elapsedTime / SESSION_TOTAL_MS));
 
   const applyPhaseAdvance = useCallback(
     (fromSkip: boolean) => {
-      const current = phaseIndexRef.current;
-      if (current + 1 >= 4) {
-        clearPhaseInterval();
+      const current = Math.floor(elapsedRef.current / 12000);
+      if (current >= 3) {
+        setMiniPlayer(null);
         go(6);
         return;
       }
-      const next = current + 1;
+      const next = Math.min(3, current + 1);
       phaseIndexRef.current = next;
       setPhaseIndex(next);
-      setProgress(0);
       setMessageOpacity(0);
       window.setTimeout(() => setMessageOpacity(1), 80);
       if (next === 2 && fromSkip) {
-        clearPhaseInterval();
         go(5);
-        return;
-      }
-      if (fromSkip) {
-        phaseIntervalRef.current = window.setInterval(() => {
-          if (!playingRef.current) return;
-          applyPhaseAdvance(false);
-        }, PHASE_DURATION_MS);
       }
     },
-    [clearPhaseInterval, go, setPhaseIndex],
+    [go, setMiniPlayer, setPhaseIndex],
   );
 
   const skipPhase = useCallback(() => {
-    clearPhaseInterval();
+    const nextElapsed = Math.min(SESSION_TOTAL_MS, (Math.floor(elapsedTime / 12000) + 1) * 12000);
+    setElapsedTime(nextElapsed);
     applyPhaseAdvance(true);
-  }, [clearPhaseInterval, applyPhaseAdvance]);
-
-  const mountPhaseInterval = useCallback(() => {
-    clearPhaseInterval();
-    phaseIntervalRef.current = window.setInterval(() => {
-      if (!playingRef.current) return;
-      applyPhaseAdvance(false);
-    }, PHASE_DURATION_MS);
-  }, [clearPhaseInterval, applyPhaseAdvance]);
+  }, [applyPhaseAdvance, elapsedTime, setElapsedTime]);
 
   useEffect(() => {
     phaseIndexRef.current = phaseIndex;
   }, [phaseIndex]);
 
   useEffect(() => {
-    playingRef.current = playing;
-  }, [playing]);
-
-  useEffect(() => {
-    if (!playing) {
-      clearPhaseInterval();
-      return;
+    elapsedRef.current = elapsedTime;
+    const nextPhase = Math.min(3, Math.floor(elapsedTime / 12000));
+    if (nextPhase !== phaseIndexRef.current) {
+      phaseIndexRef.current = nextPhase;
+      setPhaseIndex(nextPhase);
+      setMessageOpacity(0);
+      window.setTimeout(() => setMessageOpacity(1), 80);
     }
-    mountPhaseInterval();
-    return () => clearPhaseInterval();
-  }, [playing, mountPhaseInterval, clearPhaseInterval]);
-
-  useEffect(() => {
-    setProgress(0);
-  }, [phaseIndex]);
-
-  useEffect(() => {
-    if (!playing) return;
-    const id = window.setInterval(() => {
-      setProgress(p => {
-        const next = p + PROGRESS_PER_TICK;
-        if (next >= 100) return 100;
-        return next;
-      });
-    }, PHASE_TICK_MS);
-    return () => clearInterval(id);
-  }, [playing, phaseIndex]);
+    if (elapsedTime >= SESSION_TOTAL_MS) {
+      setMiniPlayer(null);
+      go(6);
+    }
+  }, [elapsedTime, go, setMiniPlayer, setPhaseIndex]);
 
   useEffect(() => {
     if (!toast) return;
@@ -913,10 +856,24 @@ export function PlayerScreen({
   return (
     <div className="h-full relative overflow-y-auto no-scrollbar transition-[background] duration-700" style={{ background: session.atmosphere.player }}>
       <div className="flex items-center justify-between px-5 py-3 sticky top-0 z-10 bg-gradient-to-b from-[oklch(0.05_0_0/0.4)] to-transparent">
-        <button type="button" onClick={() => go(1)} className="p-1"><ChevronDown width={24} height={24} /></button>
+        <button
+          type="button"
+          onClick={() => {
+            setMiniPlayer({ session, phaseIndex, elapsedTime, isPlaying: playing });
+            go(1);
+          }}
+          className="p-1"
+        >
+          <ChevronDown width={24} height={24} />
+        </button>
         <div className="text-center">
           <div className="text-[9.5px] uppercase tracking-[0.22em] text-muted-foreground">Aura Session</div>
-          <div className="text-[12.5px] font-semibold tracking-[-0.01em]">{session.title}</div>
+          <div
+            className="text-[15px] font-medium tracking-[-0.01em] whitespace-nowrap overflow-hidden text-ellipsis"
+            style={{ maxWidth: "calc(100% - 80px)" }}
+          >
+            {session.sessionName}
+          </div>
         </div>
         <button type="button" onClick={() => setMenuOpen(true)} className="p-1 text-muted-foreground"><Dots width={22} height={22} /></button>
       </div>
@@ -938,7 +895,7 @@ export function PlayerScreen({
               className="w-full text-left text-[15px] text-white py-3.5 border-b border-white/[0.08]"
               onClick={() => {
                 setMenuOpen(false);
-                clearPhaseInterval();
+                setMiniPlayer(null);
                 go(6);
               }}
             >
@@ -967,15 +924,15 @@ export function PlayerScreen({
       <div className="grid place-items-center mt-4">
         <PhaseOrb
           size={280}
-          colors={phaseTrack.orbColor}
-          intensity={session.orbGlowOpacity}
+          colors={{ primary: "#0a0f1a", glow: session.orbGlow }}
+          intensity={phaseTrack.orbOpacity}
         />
       </div>
 
       <div className="px-5 mt-5 flex items-end justify-between gap-3">
         <div>
           <div className="text-[10px] uppercase tracking-[0.18em] text-primary/90 flex items-center gap-1.5">
-            <SparkIcon width={10} height={10} /> Phase {activePhaseIdx + 1} of 4 · {session.phaseLabels[activePhaseIdx]}
+            <SparkIcon width={10} height={10} /> Phase {activePhaseIdx + 1} of 4 · {phaseLabels[activePhaseIdx]}
           </div>
           <div className="text-[19px] font-extrabold tracking-[-0.025em] mt-1 leading-tight">{phaseTrack.trackName}</div>
           <div className="text-[12.5px] text-muted-foreground tracking-[-0.005em]">{phaseTrack.artist}</div>
@@ -987,10 +944,7 @@ export function PlayerScreen({
 
       <div className="px-5 mt-4">
         <div className="h-1 rounded-full bg-white/10 overflow-hidden">
-          <div
-            className="h-full bg-foreground/90 rounded-full transition-[width] duration-100 linear"
-            style={{ width: `${progress}%` }}
-          />
+          <div className="h-full bg-foreground/90 rounded-full transition-[width] duration-100 linear" style={{ width: `${phaseProgress}%` }} />
         </div>
         <div className="flex justify-between text-[10.5px] text-muted-foreground mt-1.5 tabular-nums">
           <span>{formatPhaseTime(elapsedSec)}</span>
@@ -1020,9 +974,9 @@ export function PlayerScreen({
             <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" /> adapting live
           </span>
         </div>
-        <ArcCurve phase={activePhase} className="mt-1" />
+        <ArcCurve t={t} arcPath={session.arcPath} className="mt-1" />
         <div className="flex justify-between -mt-1">
-          {session.phaseLabels.map((p, i) => (
+          {phaseLabels.map((p, i) => (
             <span
               key={p}
               className={`text-[10px] tracking-[-0.005em] ${i === activePhaseIdx ? "text-foreground font-medium" : "text-muted-foreground"}`}
@@ -1049,9 +1003,10 @@ export function PlayerScreen({
 }
 
 /* ---------- SCREEN 5 — ADAPTATION ---------- */
-export function AdaptScreen({ go, session }: FlowProps) {
+export function AdaptScreen({ go, session, elapsedTime }: FlowProps) {
   const [applied, setApplied] = useState(false);
   const adaptCopy = getAdaptCopy(session);
+  const recalibratedT = Math.max(0, Math.min(1, elapsedTime / SESSION_TOTAL_MS - 0.05));
 
   return (
     <div className="h-full relative overflow-y-auto no-scrollbar pb-28 transition-[background] duration-700" style={{ background: session.atmosphere.adapt }}>
@@ -1059,7 +1014,7 @@ export function AdaptScreen({ go, session }: FlowProps) {
         <button type="button" onClick={() => go(4)} className="p-1"><ChevronDown width={24} height={24} /></button>
         <div className="text-center">
           <div className="text-[9.5px] uppercase tracking-[0.22em] text-muted-foreground">Aura Session</div>
-          <div className="text-[12.5px] font-semibold tracking-[-0.01em]">{session.title}</div>
+          <div className="text-[12.5px] font-semibold tracking-[-0.01em]">{session.sessionName}</div>
         </div>
         <button type="button" onClick={() => go(6)} className="p-1 text-muted-foreground"><Dots width={22} height={22} /></button>
       </div>
@@ -1118,9 +1073,9 @@ export function AdaptScreen({ go, session }: FlowProps) {
             <span className="w-1 h-1 rounded-full bg-primary/70 animate-pulse" /> recalibrating
           </span>
         </div>
-        <ArcCurve phase="activate" />
+        <ArcCurve t={recalibratedT} arcPath={session.arcPath} />
         <div className="flex justify-between text-[10px] text-muted-foreground -mt-1">
-          {session.phaseLabels.map(p => <span key={p}>{p}</span>)}
+          {getPhaseLabels(session).map(p => <span key={p}>{p}</span>)}
         </div>
       </div>
 
@@ -1141,26 +1096,27 @@ export function AdaptScreen({ go, session }: FlowProps) {
 }
 
 /* ---------- SCREEN 6 — SUMMARY ---------- */
-export function SummaryScreen({ go, session, beginComposing }: FlowProps) {
+export function SummaryScreen({ go, session, beginComposing, setMiniPlayer, setElapsedTime, setPlayerPhaseIndex, setIsPlaying }: FlowProps) {
   const [saved, setSaved] = useState(false);
   const [mood, setMood] = useState<string | null>(null);
   const [moodNote, setMoodNote] = useState<string | null>(null);
-
-  const titleLines = session.title.split(" ");
-  const mid = Math.ceil(titleLines.length / 2);
-  const titleFirst = titleLines.slice(0, mid).join(" ");
-  const titleSecond = titleLines.slice(mid).join(" ");
 
   return (
     <div className="h-full relative overflow-y-auto no-scrollbar pb-10 transition-[background] duration-700" style={{ background: session.atmosphere.summary }}>
       <div className="flex items-center justify-between px-5 py-3 sticky top-0 z-10 bg-gradient-to-b from-[oklch(0.05_0_0/0.35)] to-transparent">
         <button
           type="button"
-          onClick={() => go(1)}
+          onClick={() => {
+            setMiniPlayer(null);
+            setElapsedTime(0);
+            setPlayerPhaseIndex(0);
+            setIsPlaying(true);
+            go(1);
+          }}
           className="p-1 -ml-0.5 text-muted-foreground active:text-foreground/80 transition-colors"
           aria-label="Back to Home"
         >
-          <BackIcon width={24} height={24} strokeWidth={2} />
+          <ChevronDown width={24} height={24} />
         </button>
         <div className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-primary/90 flex items-center gap-1.5">
           <SparkIcon width={12} height={12} /> Session complete
@@ -1169,8 +1125,8 @@ export function SummaryScreen({ go, session, beginComposing }: FlowProps) {
       </div>
 
       <div className="px-5 mt-3">
-        <h1 className="text-[28px] font-extrabold tracking-[-0.03em] leading-[1.05]">
-          {titleFirst}{titleSecond ? <><br />{titleSecond}</> : null}
+        <h1 className="text-[20px] font-bold tracking-[-0.02em] leading-[1.1] whitespace-nowrap overflow-hidden text-ellipsis max-w-full">
+          {session.sessionName}
         </h1>
         <p className="text-[12.5px] text-muted-foreground mt-2">{session.summaryLine}</p>
       </div>
@@ -1191,14 +1147,6 @@ export function SummaryScreen({ go, session, beginComposing }: FlowProps) {
             <div className="text-[9.5px] text-muted-foreground tracking-[-0.005em]">{s.t}</div>
           </div>
         ))}
-      </div>
-
-      <div className="mx-4 mt-5 px-1">
-        <div className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Emotional progression</div>
-        <ArcCurve phase="release" className="mt-1" />
-        <div className="flex justify-between text-[10px] text-muted-foreground -mt-1">
-          {session.phaseLabels.map(p => <span key={p}>{p}</span>)}
-        </div>
       </div>
 
       <div className="mx-4 mt-4 rounded-2xl bg-white/[0.03] p-4">
