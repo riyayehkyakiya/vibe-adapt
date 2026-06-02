@@ -672,6 +672,7 @@ export function GeneratingScreen({ go, session, setMiniPlayer, setElapsedTime, s
   const statements = session.composingStatements;
   const [stmtIdx, setStmtIdx] = useState(0);
   const [previewT, setPreviewT] = useState(0);
+  const generationMs = 5200;
 
   useEffect(() => {
     const stmtTimer = setInterval(() => {
@@ -681,18 +682,18 @@ export function GeneratingScreen({ go, session, setMiniPlayer, setElapsedTime, s
   }, [statements.length]);
 
   useEffect(() => {
-    const t = setTimeout(() => go(4), 4800 + 3000);
-    return () => clearTimeout(t);
-  }, [go]);
-
-  useEffect(() => {
     const start = performance.now();
     const id = window.setInterval(() => {
       const elapsed = performance.now() - start;
-      setPreviewT(Math.min(0.08, (elapsed / 2000) * 0.08));
-    }, 100);
+      const progress = Math.min(1, elapsed / generationMs);
+      setPreviewT(progress);
+      if (progress >= 1) {
+        window.clearInterval(id);
+        go(4);
+      }
+    }, 40);
     return () => window.clearInterval(id);
-  }, []);
+  }, [generationMs, go]);
 
   const orbColors = composingOrbColors(session);
 
@@ -729,7 +730,7 @@ export function GeneratingScreen({ go, session, setMiniPlayer, setElapsedTime, s
       <div className="px-6 mt-3 text-center">
         <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Composing</div>
         <h2 className="text-[22px] font-extrabold tracking-[-0.025em] mt-2">{session.sessionName}</h2>
-        <p className="text-[12.5px] text-muted-foreground mt-1">{session.subtitle}</p>
+        <p className="text-[12.5px] text-muted-foreground mt-1">{session.duration} · 4 emotional phases</p>
       </div>
 
       <div className="px-6 mt-5">
@@ -1131,7 +1132,7 @@ export function SummaryScreen({ go, session, beginComposing, setMiniPlayer, setE
         <h1 className="text-[20px] font-bold tracking-[-0.02em] leading-[1.1] whitespace-nowrap overflow-hidden text-ellipsis max-w-full">
           {session.sessionName}
         </h1>
-        <p className="text-[12.5px] text-muted-foreground mt-2">{session.summaryLine}</p>
+        <p className="text-[12.5px] text-muted-foreground mt-2">{session.duration} · 4 emotional phases</p>
       </div>
 
       <div className="grid place-items-center mt-2">
