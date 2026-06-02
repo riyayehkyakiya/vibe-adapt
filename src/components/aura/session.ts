@@ -23,6 +23,7 @@ export interface SessionConfig {
   subtitle: string;
   phases: [PhaseConfig, PhaseConfig, PhaseConfig, PhaseConfig];
   duration: string;
+  sessionIncludes: [string, string, string, string];
   orbGlowOpacity: number;
   composingOrchestration: string;
   intent: string;
@@ -87,6 +88,12 @@ const GOLDEN_HOUR_LIFT: SessionConfig = {
     phase("Radiate", "Yellow", "Coldplay", "high", 1, "Releasing into full emotional warmth and resonance."),
   ],
   duration: "48 sec",
+  sessionIncludes: [
+    "Uplifting melodic arc",
+    "Progressive brightness",
+    "Familiar energetic tracks",
+    "Full emotional release",
+  ],
   orbGlowOpacity: 1,
   composingOrchestration: "Building a bright, expansive emotional rise.",
   intent: "Uplifted joy",
@@ -118,6 +125,12 @@ const SOFT_REFLECTION_SESSION: SessionConfig = {
     phase("Let Go", "Iktara", "Kavita Seth, Amit Trivedi", "high", 0.75, "Allowing emotional release through lyrical resonance."),
   ],
   duration: "48 sec",
+  sessionIncludes: [
+    "Emotional melodic recall",
+    "Reflective pacing",
+    "Nostalgic resonance",
+    "Soft emotional release",
+  ],
   orbGlowOpacity: 1,
   composingOrchestration: "Holding a gentle reflective valley with soft emotional space.",
   intent: "Reflective release",
@@ -149,6 +162,12 @@ const EMOTIONAL_DECOMPRESSION_ARC: SessionConfig = {
     phase("Lift", "Fix You", "Coldplay", "high", 0.78, "Gently lifting with emotionally familiar lyrical resonance."),
   ],
   duration: "48 sec",
+  sessionIncludes: [
+    "Ambient grounding layer",
+    "Gradual emotional lift",
+    "Low-stimulus transitions",
+    "Lyrical release at close",
+  ],
   orbGlowOpacity: 0.85,
   composingOrchestration: "Building a patient decompression arc with gradual lift.",
   intent: "Emotional decompression",
@@ -180,6 +199,12 @@ const MIDNIGHT_RECOVERY_SESSION: SessionConfig = {
     phase("Rest", "Kasoor", "Prateek Kuhad", "medium", 0.35, "Closing with intimate warmth as the session softens to rest."),
   ],
   duration: "48 sec",
+  sessionIncludes: [
+    "Nervous system grounding",
+    "Ambient decompression",
+    "Low-stimulation transitions",
+    "Emotional regulation",
+  ],
   orbGlowOpacity: 1,
   composingOrchestration: "Designing a smooth descending arc toward rest.",
   intent: "Night calm",
@@ -211,6 +236,12 @@ const HIGH_ENERGY_RESET: SessionConfig = {
     phase("Sustain", "Runaway", "AURORA", "medium", 0.85, "Holding elevated energy with emotional resonance."),
   ],
   duration: "48 sec",
+  sessionIncludes: [
+    "Progressive energy buildup",
+    "Familiar momentum tracks",
+    "Controlled stimulation",
+    "Emotional uplift",
+  ],
   orbGlowOpacity: 1,
   composingOrchestration: "Building aggressively through peak and holding intensity.",
   intent: "Power and drive",
@@ -242,6 +273,12 @@ const VELVET_WARMTH_SESSION: SessionConfig = {
     phase("Linger", "Raabta", "Arijit Singh", "high", 0.85, "Closing with deep emotional resonance and warmth."),
   ],
   duration: "48 sec",
+  sessionIncludes: [
+    "Warm melodic intimacy",
+    "Lyrical emotional depth",
+    "Unhurried pacing",
+    "Soft ambient grounding",
+  ],
   orbGlowOpacity: 1,
   composingOrchestration: "Maintaining warm, intimate continuity through a gentle wave.",
   intent: "Comfort and closeness",
@@ -273,6 +310,12 @@ const DEEP_FOCUS_RECOVERY_ARC: SessionConfig = {
     phase("Release", "Tum Hi Ho", "Arijit Singh", "high", 0.82, "Reintroducing emotionally resonant tracks as your session closes."),
   ],
   duration: "48 sec",
+  sessionIncludes: [
+    "Instrumental focus layer",
+    "Reduced lyrical density",
+    "Rhythmic consistency",
+    "Cognitive stabilization",
+  ],
   orbGlowOpacity: 1,
   composingOrchestration: "Designing a focus arc with gradual cognitive activation.",
   intent: "Sustained focus",
@@ -311,14 +354,43 @@ export function buildMiniPlayerPlayback(
 }
 
 export function getSessionFromInput(input: string): SessionConfig {
+  const sessionDefaults: Record<string, string> = {
+    "Golden Hour Lift": "45 min",
+    "Soft Reflection Session": "35 min",
+    "Emotional Decompression Arc": "50 min",
+    "Midnight Recovery Session": "40 min",
+    "High Energy Reset": "40 min",
+    "Velvet Warmth Session": "45 min",
+    "Deep Focus Recovery Arc": "45 min",
+  };
+  const parseDuration = (text: string): string | null => {
+    const h = text.match(/\b(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours)\b/);
+    if (h) {
+      const mins = Math.round(Number(h[1]) * 60);
+      return `${Math.max(30, mins)} min`;
+    }
+    const m = text.match(/\b(\d+)\s*(?:m|min|mins|minute|minutes)\b/);
+    if (m) {
+      const mins = Number(m[1]);
+      return `${Math.max(30, mins)} min`;
+    }
+    return null;
+  };
+  const withDuration = (session: SessionConfig): SessionConfig => {
+    const parsedDuration = parseDuration(t);
+    return {
+      ...session,
+      duration: parsedDuration ?? sessionDefaults[session.sessionName] ?? "45 min",
+    };
+  };
   const t = input.toLowerCase();
-  if (/(happy|happiness|joy|excited|excitement|good mood|amazing|great|celebrating|euphoric|elated|uplifted|energetic|pumped)/.test(t)) return GOLDEN_HOUR_LIFT;
-  if (/(lonely|loneliness|heartbreak|heartbroken|nostalgia|nostalgic|miss someone|missing someone|alone|lost|empty|grief|longing)/.test(t)) return SOFT_REFLECTION_SESSION;
-  if (/(sad|sadness|overwhelmed|overwhelm|crying|tearful|depressed|heavy|broken|shattered|falling apart|too much|can't cope)/.test(t)) return EMOTIONAL_DECOMPRESSION_ARC;
-  if (/(anxious|anxiety|stressed|stress|nervous|worried|panic|restless|racing thoughts|can't sleep|night|calm down|overwhelmed at night|sleep|tired|rest|wind down|bed)/.test(t)) return MIDNIGHT_RECOVERY_SESSION;
-  if (/(motivated|motivation|confidence|confident|gym|workout|energy|hype|run|training|power|pump|burnout|need energy|exhausted but need to push|hustle|grind)/.test(t)) return HIGH_ENERGY_RESET;
-  if (/(romantic|romance|love|peaceful|peace|comfortable|comfort|cozy|warm|intimate|content|serene|grateful|calm and happy|relaxed|at ease)/.test(t)) return VELVET_WARMTH_SESSION;
-  return DEEP_FOCUS_RECOVERY_ARC;
+  if (/(happy|happiness|joy|excited|excitement|good mood|amazing|great|celebrating|euphoric|elated|uplifted|energetic|pumped)/.test(t)) return withDuration(GOLDEN_HOUR_LIFT);
+  if (/(lonely|loneliness|heartbreak|heartbroken|nostalgia|nostalgic|miss someone|missing someone|alone|lost|empty|grief|longing)/.test(t)) return withDuration(SOFT_REFLECTION_SESSION);
+  if (/(sad|sadness|overwhelmed|overwhelm|crying|tearful|depressed|heavy|broken|shattered|falling apart|too much|can't cope)/.test(t)) return withDuration(EMOTIONAL_DECOMPRESSION_ARC);
+  if (/(anxious|anxiety|stressed|stress|nervous|worried|panic|restless|racing thoughts|can't sleep|night|calm down|overwhelmed at night|sleep|tired|rest|wind down|bed)/.test(t)) return withDuration(MIDNIGHT_RECOVERY_SESSION);
+  if (/(motivated|motivation|confidence|confident|gym|workout|energy|hype|run|training|power|pump|burnout|need energy|exhausted but need to push|hustle|grind)/.test(t)) return withDuration(HIGH_ENERGY_RESET);
+  if (/(romantic|romance|love|peaceful|peace|comfortable|comfort|cozy|warm|intimate|content|serene|grateful|calm and happy|relaxed|at ease)/.test(t)) return withDuration(VELVET_WARMTH_SESSION);
+  return withDuration(DEEP_FOCUS_RECOVERY_ARC);
 }
 
 /** @deprecated Use getSessionFromInput */

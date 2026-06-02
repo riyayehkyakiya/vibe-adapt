@@ -281,16 +281,16 @@ function MiniPlayer({
     <div className="absolute bottom-[68px] inset-x-2.5 rounded-[5px] overflow-hidden bg-[oklch(0.155_0_0)]">
       <div className="w-full flex items-center gap-2.5 px-2 py-1.5 pr-2">
         <button type="button" onClick={onTap} className="flex flex-1 items-center gap-2.5 min-w-0 text-left active:opacity-90 transition-opacity">
-          <div className="relative shrink-0">
-            <AlbumArt seed={playback.session.sessionName} size={36} rounded="rounded-[3px]" variant="single" />
-            <div
-              className="absolute -inset-0.5 rounded-[4px] pointer-events-none opacity-70"
-              style={{
-                boxShadow: `0 0 12px ${playback.session.orbGlow}`,
-                border: `1px solid ${playback.session.orbGlow}33`,
-              }}
-            />
-          </div>
+          <div
+            className="shrink-0"
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 6,
+              background: `radial-gradient(circle at 40% 40%, ${playback.session.orbGlow}99, ${playback.session.orbGlow}22)`,
+              flexShrink: 0,
+            }}
+          />
           <div className="flex-1 min-w-0">
             <div className="text-[12.5px] font-semibold truncate tracking-[-0.015em] leading-tight">
               {track.trackName}
@@ -629,12 +629,7 @@ export function InputScreen({ go, inputText, setInputText, beginComposing, setMi
                 YOUR SESSION WILL INCLUDE
               </p>
               <div className="flex flex-wrap gap-2 mt-2">
-                {[
-                  "Ambient decompression",
-                  "Familiar melodic tracks",
-                  "Instrumental focus layer",
-                  "Emotional release",
-                ].map(label => (
+                {preview.sessionIncludes.map(label => (
                   <span
                     key={label}
                     className="text-[12px] rounded-full"
@@ -743,18 +738,29 @@ export function GeneratingScreen({ go, session, setMiniPlayer, setElapsedTime, s
           {getPhaseLabels(session).map(p => <span key={p}>{p}</span>)}
         </div>
 
-        <div className="flex justify-center gap-6 mt-4 mb-2">
-          <div className="text-center">
+        <div
+          className="flex justify-between mt-7 mb-2 border-t border-white/[0.06]"
+        >
+          <div
+            className="text-center flex-1"
+            style={{ padding: "16px 20px" }}
+          >
             <p className="text-xs text-white/30 uppercase tracking-wider mb-1">Duration</p>
-            <p className="text-sm text-white/70 font-medium">{session.duration || "45 min"}</p>
+            <p className="text-sm text-white/70 font-medium">{session.duration}</p>
           </div>
-          <div className="w-px bg-white/10" />
-          <div className="text-center">
+          <div className="w-px bg-white/[0.08]" />
+          <div
+            className="text-center flex-1"
+            style={{ padding: "16px 20px" }}
+          >
             <p className="text-xs text-white/30 uppercase tracking-wider mb-1">Phases</p>
             <p className="text-sm text-white/70 font-medium">4 emotional phases</p>
           </div>
-          <div className="w-px bg-white/10" />
-          <div className="text-center">
+          <div className="w-px bg-white/[0.08]" />
+          <div
+            className="text-center flex-1"
+            style={{ padding: "16px 20px" }}
+          >
             <p className="text-xs text-white/30 uppercase tracking-wider mb-1">Adapts to</p>
             <p className="text-sm text-white/70 font-medium">Your responses</p>
           </div>
@@ -806,7 +812,7 @@ export function PlayerScreen({
     (fromSkip: boolean) => {
       const current = Math.floor(elapsedRef.current / 12000);
       if (current >= 3) {
-        setMiniPlayer(null);
+        setMiniPlayer({ session, phaseIndex: 3, elapsedTime: SESSION_TOTAL_MS, isPlaying: false });
         go(6);
         return;
       }
@@ -819,7 +825,7 @@ export function PlayerScreen({
         go(5);
       }
     },
-    [go, setMiniPlayer, setPhaseIndex],
+    [go, session, setMiniPlayer, setPhaseIndex],
   );
 
   const skipPhase = useCallback(() => {
@@ -842,10 +848,10 @@ export function PlayerScreen({
       window.setTimeout(() => setMessageOpacity(1), 80);
     }
     if (elapsedTime >= SESSION_TOTAL_MS) {
-      setMiniPlayer(null);
+      setMiniPlayer({ session, phaseIndex: 3, elapsedTime: SESSION_TOTAL_MS, isPlaying: false });
       go(6);
     }
-  }, [elapsedTime, go, setMiniPlayer, setPhaseIndex]);
+  }, [elapsedTime, go, session, setMiniPlayer, setPhaseIndex]);
 
   useEffect(() => {
     if (!toast) return;
@@ -869,8 +875,8 @@ export function PlayerScreen({
         <div className="text-center">
           <div className="text-[9.5px] uppercase tracking-[0.22em] text-muted-foreground">Aura Session</div>
           <div
-            className="text-[15px] font-medium tracking-[-0.01em] whitespace-nowrap overflow-hidden text-ellipsis"
-            style={{ maxWidth: "calc(100% - 80px)" }}
+            className="font-medium whitespace-nowrap overflow-hidden text-ellipsis"
+            style={{ fontSize: "14px", fontWeight: 500, letterSpacing: "-0.2px", maxWidth: "calc(100vw - 96px)" }}
           >
             {session.sessionName}
           </div>
@@ -1107,10 +1113,7 @@ export function SummaryScreen({ go, session, beginComposing, setMiniPlayer, setE
         <button
           type="button"
           onClick={() => {
-            setMiniPlayer(null);
-            setElapsedTime(0);
-            setPlayerPhaseIndex(0);
-            setIsPlaying(true);
+            setMiniPlayer({ session, phaseIndex: 3, elapsedTime: SESSION_TOTAL_MS, isPlaying: false });
             go(1);
           }}
           className="p-1 -ml-0.5 text-muted-foreground active:text-foreground/80 transition-colors"
